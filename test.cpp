@@ -8,7 +8,7 @@ int main()
     JsonValue *j = new JsonNull();
     double value;
     try {
-        value = j->toDouble();
+        value = j->ToDouble();
     } catch (std::exception &e) {
         std::cout << e.what() << std::endl;
     }
@@ -16,11 +16,20 @@ int main()
     for (size_t i = 0; i < ja->size(); ++i)
     {
         (*ja)[i] = 12.;
-        std::cout << (*ja)[i].toDouble() << std::endl;
+        std::cout << (*ja)[i].ToDouble() << std::endl;
     }
-    Json json = {1., 2., 3.};
-    for (size_t i = 0; i < json.size(); ++i)
-    {
-        std::cout << json[i].toDouble() << std::endl;
-    }
+    Json json = {1., 2., "string3"};
+    std::cout << json << std::endl;
+    json = "test";
+    std::cout << json.GetStringRef() << std::endl;
+    json = {
+        {"test", 1}, 
+        {"pi", 3.14}, 
+        {"nested", {
+                {"key", "value"}, 
+                {"ok", "ok"}
+            }
+        }
+    };
+    std::cout << json << std::endl;
 }
