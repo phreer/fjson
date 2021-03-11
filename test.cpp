@@ -18,5 +18,9 @@ int main()
         (*ja)[i] = 12.;
         std::cout << (*ja)[i].toDouble() << std::endl;
     }
-
+    Json json = {1., 2., 3.};
+    for (size_t i = 0; i < json.size(); ++i)
+    {
+        std::cout << json[i].toDouble() << std::endl;
+    }
 }
