@@ -235,6 +235,7 @@ private:
     container_type values_;
 };
 
+
 class JsonObject: public JsonValue
 {
 public:
@@ -295,6 +296,11 @@ public:
         json_value_ = std::make_shared<JsonString>(std::move(str));
     }
     Json(const char *src): Json(string_type(src)) {}
+    Json(bool value)
+    {
+        if (value) json_value_ = std::make_shared<JsonTrue>();
+        else json_value_ = std::make_shared<JsonFalse>();
+    }
     Json(const std::initializer_list<Json> &init_list)
     {
         bool is_object = true;

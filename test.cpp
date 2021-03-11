@@ -23,13 +23,16 @@ int main()
     json = "test";
     std::cout << json.GetStringRef() << std::endl;
     json = {
-        {"test", 1}, 
+        {"test", 0.2 + 0.1}, 
         {"pi", 3.14}, 
         {"nested", {
                 {"key", "value"}, 
-                {"ok", "ok"}
+                {"ok", true}
             }
-        }
+        }, 
+        {"1." , 2. }
     };
     std::cout << json << std::endl;
+    std::cout << json["test"] << std::endl;
+    std::cout << json["test1"] << std::endl;
 }
