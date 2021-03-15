@@ -10,18 +10,18 @@ int main()
     try {
         value = j->ToDouble();
     } catch (std::exception &e) {
-        std::cout << e.what() << std::endl;
+        std::wcout << e.what() << std::endl;
     }
     JsonValue *ja = new JsonArray{Json(3.0), Json(1.0)};
     for (size_t i = 0; i < ja->size(); ++i)
     {
         (*ja)[i] = 12.;
-        std::cout << (*ja)[i].ToDouble() << std::endl;
+        std::wcout << (*ja)[i].ToDouble() << std::endl;
     }
     Json json = {1., 2., "string3"};
-    std::cout << json << std::endl;
-    json = "test";
-    std::cout << json.GetStringRef() << std::endl;
+    std::wcout << json << std::endl;
+    json= L"test";
+    std::wcout << json.GetStringRef() << std::endl;
     json = {
         {"test", 0.2 + 0.1}, 
         {"pi", 3.14}, 
@@ -32,7 +32,14 @@ int main()
         }, 
         {"1." , 2. }
     };
-    std::cout << json << std::endl;
-    std::cout << json["test"] << std::endl;
-    std::cout << json["test1"] << std::endl;
+    std::wcout << json << std::endl;
+    std::wcout << json["test"] << std::endl;
+    std::wcout << json["test1"] << std::endl;
+    std::wcout << json << std::endl;
+    json["test1"] = 1000.;
+    std::wcout << json["test1"] << std::endl;
+    std::wcout << json << std::endl;
+    std::wstring json_str = LR"({"1.": 2, "nested": {"key": "value", "ok": true}, "pi": 3.14, "test": 0.3, "test1": 1000})";
+    _ParseString(json, json_str.begin(), json_str.end());
+    std::wcout << json;
 }

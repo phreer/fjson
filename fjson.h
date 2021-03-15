@@ -1,4 +1,6 @@
 #include <iostream>
+#include <codecvt>
+#include <locale>
 #include <vector>
 #include <string>
 #include <map>
@@ -9,14 +11,15 @@
 
 namespace fjson {
 
-enum class ValueType { 
+enum class JsonValueType { 
     Number = 0, 
     Null = 1, 
     True = 2, 
     False = 3, 
     String = 4, 
     Array = 5, 
-    Object = 6
+    Object = 6, 
+    InvalidValue = 7, 
 };
 
 const char *ValueTypeStrs[] = {
@@ -26,12 +29,14 @@ const char *ValueTypeStrs[] = {
     "False",
     "String",
     "Array",
-    "Object"
+    "Object", 
+    "InvalidValue"
 };
 
-using string_type = std::string;
+using string_type = std::wstring;
+using charT = string_type::value_type;
 
-inline const char* ValueTypeToStr(ValueType type)
+inline const char* ValueTypeToStr(JsonValueType type)
 {
     return ValueTypeStrs[static_cast<size_t>(type)];
 } 
@@ -41,7 +46,7 @@ class JsonError: public std::exception
 public:
     JsonError() = default;
     JsonError(const std::string &message): message_(message) {}
-    JsonError(std::string &&message): message_(message) {}
+    JsonError(std::string &&message): message_(std::move(message)) {}
     virtual const char* what() const noexcept
     {
         return message_.c_str();
@@ -55,7 +60,7 @@ class IncompatibleTypeError: public JsonError
 public:
     IncompatibleTypeError() = default;
     IncompatibleTypeError(const std::string &message): JsonError(message) {}
-    IncompatibleTypeError(std::string &&message): JsonError(message) {}
+    IncompatibleTypeError(std::string &&message): JsonError(std::move(message)) {}
 };
 
 class IndexTypeError: public JsonError
@@ -63,8 +68,24 @@ class IndexTypeError: public JsonError
 public:
     IndexTypeError() = default;
     IndexTypeError(const std::string &message): JsonError(message) {}
-    IndexTypeError(std::string &&message): JsonError(message) {}
+    IndexTypeError(std::string &&message): JsonError(std::move(message)) {}
 };
+
+class ParseError: public JsonError
+{
+public:
+    ParseError() = default;
+    ParseError(const std::string &message, 
+               string_type::difference_type offset):
+            JsonError(message), offset_(offset) {}
+    ParseError(std::string &&message, 
+               string_type::difference_type offset): 
+            JsonError(std::move(message)) {}
+    string_type::difference_type GetOffset() const { return offset_; }
+private:
+    string_type::difference_type offset_;
+};
+
 
 class Json;
 
@@ -72,16 +93,17 @@ class JsonValue
 {
 public:
     // static JsonValue* parseFile(std::string filename);
-    JsonValue(ValueType type): type_(type) {}
+    JsonValue(JsonValueType type): type_(type) {}
     virtual ~JsonValue() {}
-    ValueType GetType() const { return type_; }
-    bool IsNumber() const { return type_ == ValueType::Number; }
-    bool IsNull() const { return type_ == ValueType::Null; }
-    bool IsTrue() const { return type_ == ValueType::True; }
-    bool IsFalse() const { return type_ == ValueType::False; }
-    bool IsString() const { return type_ == ValueType::String; }
-    bool IsArray() const { return type_ == ValueType::Array; }
-    bool IsObject() const { return type_ == ValueType::Object; }
+    JsonValueType GetType() const { return type_; }
+    bool IsNumber() const { return type_ == JsonValueType::Number; }
+    bool IsNull() const { return type_ == JsonValueType::Null; }
+    bool IsTrue() const { return type_ == JsonValueType::True; }
+    bool IsFalse() const { return type_ == JsonValueType::False; }
+    bool IsString() const { return type_ == JsonValueType::String; }
+    bool IsArray() const { return type_ == JsonValueType::Array; }
+    bool IsObject() const { return type_ == JsonValueType::Object; }
+    bool IsValid() const { return type_ != JsonValueType::InvalidValue; }
     virtual size_t size() const
     {
         std::string message = "calling size() is incompatible for '";
@@ -139,20 +161,20 @@ public:
     }
     
 private:
-    ValueType type_;
+    JsonValueType type_;
 };
 
 class JsonNull: public JsonValue
 {
 public:
-    JsonNull(): JsonValue(ValueType::Null) {}
+    JsonNull(): JsonValue(JsonValueType::Null) {}
     ~JsonNull() {}
 };
 
 class JsonNumber: public JsonValue
 {
 public:
-   JsonNumber(double value): JsonValue(ValueType::Number), value_(value) {}
+   JsonNumber(double value): JsonValue(JsonValueType::Number), value_(value) {}
    virtual double ToDouble() const override
    {
        return value_;
@@ -164,22 +186,22 @@ private:
 class JsonTrue: public JsonValue
 {
 public:
-    JsonTrue(): JsonValue(ValueType::True) {}
+    JsonTrue(): JsonValue(JsonValueType::True) {}
     ~JsonTrue() {}
 };
 
 class JsonFalse: public JsonValue
 {
 public:
-    JsonFalse(): JsonValue(ValueType::False) {}
+    JsonFalse(): JsonValue(JsonValueType::False) {}
     ~JsonFalse() {}
 };
 
 class JsonString: public JsonValue
 {
 public:
-    JsonString(const string_type &str): JsonValue(ValueType::String), value_(str) {}
-    JsonString(string_type &&str): JsonValue(ValueType::String), value_(str) {}
+    JsonString(const string_type &str): JsonValue(JsonValueType::String), value_(str) {}
+    JsonString(string_type &&str): JsonValue(JsonValueType::String), value_(str) {}
     virtual string_type ToString() const override
     {
         return value_;
@@ -205,7 +227,7 @@ public:
     using const_iterator = container_type::const_iterator;
 
     JsonArray(const std::initializer_list<Json> &init_list): 
-        JsonValue(ValueType::Array), values_(init_list) {}
+        JsonValue(JsonValueType::Array), values_(init_list) {}
     virtual Json& operator[] (int index) override
     {
         assert(index < values_.size() && -index <= static_cast<int>(values_.size()));
@@ -243,7 +265,7 @@ public:
     using iterator = container_type::iterator;
     using const_iterator = container_type::const_iterator;
 
-    JsonObject(): JsonValue(ValueType::Object) {}
+    JsonObject(): JsonValue(JsonValueType::Object) {}
 
     virtual Json& operator[] (const string_type &key) override
     {
@@ -279,10 +301,21 @@ private:
 };
 
 
+class JsonInvalidValue: public JsonValue
+{
+public:
+    JsonInvalidValue(): JsonValue(JsonValueType::InvalidValue) {}
+    ~JsonInvalidValue() {}
+};
+
+
 class Json
 {
 public:
-    Json() {}
+    Json()
+    {
+        json_value_ = std::make_shared<JsonInvalidValue>();
+    }
     Json(double value)
     {
         json_value_ = std::make_shared<JsonNumber>(value);
@@ -295,7 +328,13 @@ public:
     {
         json_value_ = std::make_shared<JsonString>(std::move(str));
     }
-    Json(const char *src): Json(string_type(src)) {}
+    Json(const char *src)
+    {
+        std::wstring_convert<std::codecvt_utf8_utf16<charT> > converter;
+        string_type ws = converter.from_bytes(src);
+        json_value_ = std::make_shared<JsonString>(ws);
+    }
+    Json(const string_type::value_type *src): Json(string_type(src)) {}
     Json(bool value)
     {
         if (value) json_value_ = std::make_shared<JsonTrue>();
@@ -321,7 +360,7 @@ public:
         }
     }
     size_t size() const { return json_value_->size(); }
-    ValueType GetType() const { return json_value_->GetType(); } 
+    JsonValueType GetType() const { return json_value_->GetType(); } 
     double ToDouble() const { return json_value_->ToDouble(); }
     bool ToBool() const { return json_value_->ToBool(); }
 
@@ -342,11 +381,11 @@ public:
         return json_value_->operator[](key);
     }
 
-    Json& operator[] (const char *key)
+    Json& operator[] (const charT *key)
     {
         return json_value_->operator[](string_type(key));
     }
-    const Json& operator[] (const char *key) const
+    const Json& operator[] (const charT *key) const
     {
         return json_value_->operator[](string_type(key));
     }
@@ -378,8 +417,9 @@ public:
     bool IsString() const { return json_value_->IsString(); }
     bool IsArray() const { return json_value_->IsArray(); }
     bool IsObject() const { return json_value_->IsObject(); }
+    bool IsValid() const { return json_value_->IsValid(); }
     
-    friend std::ostream& operator<< (std::ostream &o, const Json &json);
+    friend std::wostream& operator<< (std::wostream &o, const Json &json);
     
     // TODO: add iterator to iterate the elements
     class object_iterator
@@ -405,30 +445,31 @@ public:
         
     };
     
+    static Json parse(const string_type &str);
 private:
     std::shared_ptr<JsonValue> json_value_;
 };
 
 
-std::ostream & operator<< (std::ostream &o, const Json &json)
+std::wostream & operator<< (std::wostream &o, const Json &json)
 {
     switch(json.GetType()) {
-    case ValueType::Null: 
+    case JsonValueType::Null: 
         o << "Null";
         break;
-    case ValueType::True:
+    case JsonValueType::True:
         o << "true";
         break;
-    case ValueType::False:
+    case JsonValueType::False:
         o << "false";
         break;
-    case ValueType::Number:
+    case JsonValueType::Number:
         o << json.ToDouble();
         break;
-    case ValueType::String:
+    case JsonValueType::String:
         o << "\"" << json.GetStringRef() << "\"";
         break;
-    case ValueType::Array: {
+    case JsonValueType::Array: {
         o << "[";
         auto array_json = std::dynamic_pointer_cast<JsonArray>(json.json_value_);
         for (auto iter = array_json->cbegin(), end = array_json->cend(); 
@@ -439,18 +480,369 @@ std::ostream & operator<< (std::ostream &o, const Json &json)
         o << "]";
         break;
     }
-    case ValueType::Object: {
+    case JsonValueType::Object: {
         o << "{";
         auto object_json = std::dynamic_pointer_cast<JsonObject>(json.json_value_);
+        size_t count = 0;
         for (auto iter = object_json->cbegin(), end = object_json->cend(); 
                 iter != end; ++iter) {
-            if (iter != object_json->cbegin()) o << ", ";
+            if (!iter->second.IsValid()) break;
+            if (count) o << ", ";
             o << "\"" << iter->first << "\": " << iter->second;
+            ++count;
         }
         o << "}";
         break;
     }
+    default:
+        break;
     }
     return o;
+}
+
+
+bool IsWhitespace(string_type::value_type c)
+{
+    return c == ' ' || c == '\t' || c == '\n' || c == '\r';
+}
+
+
+bool IsControlChar(string_type::value_type c)
+{
+    return (c < 0x1f) || (c == 0x7f) || ((0x80 < c) && c < 0x9f);
+}
+
+
+string_type::difference_type _ParseValue(Json &json, 
+        typename string_type::const_iterator begin, 
+        typename string_type::const_iterator end) throw (ParseError);
+
+
+string_type::difference_type _ParseArray(Json &json, 
+        typename string_type::const_iterator begin, 
+        typename string_type::const_iterator end) throw (ParseError);
+
+
+string_type::difference_type _ParseString(Json &json, 
+        typename string_type::const_iterator begin, 
+        typename string_type::const_iterator end) throw (ParseError);
+
+
+string_type::difference_type _ParseObject(Json &json, 
+        typename string_type::const_iterator begin, 
+        typename string_type::const_iterator end) throw (ParseError);
+
+
+string_type::difference_type _ParseArray(Json &json, 
+        typename string_type::const_iterator begin, 
+        typename string_type::const_iterator end) throw (ParseError)
+{
+    enum Status {WAIT_LBRAKET, WAIT_RBRAKET, COMPLETED};
+    Status status = WAIT_LBRAKET;
+    auto iter = begin;
+    size_t count = 0;
+    while (iter < end) {
+        // Skip whitespace
+        if (IsWhitespace(*iter)) {
+            ++iter;
+            break;
+        }
+
+        if (status == WAIT_LBRAKET) {
+            switch (*iter) {
+            case '[': {
+                status = WAIT_RBRAKET;
+                break;
+            }
+            default: {
+                goto complete;
+            }
+            }
+        } else if (status == WAIT_RBRAKET) {
+            switch (*iter) {
+            case ']': {
+                status = COMPLETED;
+                goto complete;
+            }
+            case ',': {
+                string_type::difference_type i;
+                try {
+                    i = _ParseValue(json[count], iter+1, end);
+                } catch (ParseError &e) {
+                    throw ParseError("invalid json string", iter - begin + i + 1);
+                }
+            }
+            }
+        } else {
+            goto complete;
+        }
+        ++iter;
+    }
+complete:
+    if (status == COMPLETED) {
+        return iter - begin;
+    }
+}
+
+
+// If any error occurred when parsing, an ParseError exception will be thrown.
+// If the parsing process completes without error, then the position of the 
+// final character, i.e., '}', will be returned.
+string_type::difference_type _ParseObject(Json &json, 
+        typename string_type::const_iterator begin, 
+        typename string_type::const_iterator end) throw (ParseError)
+{
+    enum Status {WAIT_LBRACE, WAIT_STRING1, WAIT_STRING2, WAIT_COLON, 
+                 WAIT_RBRACE_COMMA, COMPLETED};
+    Status status = WAIT_LBRACE;
+    auto iter = begin;
+    Json key, value;
+    while (iter < end) {
+        if (IsWhitespace(*iter)) {
+            goto next_loop;
+        }
+        if (status == WAIT_LBRACE) {
+            if (*iter == '{') {
+                status = WAIT_STRING1;
+                goto next_loop;
+            } else {
+                goto complete;
+            }
+        } else if (status == WAIT_STRING1) {
+            // Empty object
+            if (*iter == '}') {
+                status = COMPLETED;
+                goto next_loop;
+            }
+            string_type::difference_type i;
+            try {
+                i = _ParseString(key, iter, end);
+            } catch (ParseError &e) {
+                throw ParseError("invalid json string", iter - begin + e.GetOffset());
+            }
+            status = WAIT_COLON;
+            iter += i;
+            continue;
+        } else if (status == WAIT_STRING2) {
+            string_type::difference_type i;
+            try {
+                i = _ParseString(key, iter, end);
+            } catch (ParseError &e) {
+                throw ParseError("invalid json string", iter - begin + e.GetOffset());
+            }
+            status = WAIT_COLON;
+            iter += i;
+            continue;
+        } else if (status == WAIT_COLON) {
+            if (*iter == ':') {
+                string_type::difference_type i;
+                ++iter;
+                try {
+                    i = _ParseValue(value, iter, end);
+                } catch (ParseError &e) {
+                    throw ParseError("invalid json string", iter - begin + e.GetOffset());
+                }
+                status = WAIT_RBRACE_COMMA;
+                iter += i;
+                continue;
+            }
+            goto complete;
+        } else if (status == WAIT_RBRACE_COMMA) {
+            if (*iter == ',') {
+                status == WAIT_STRING2;
+            } else if (*iter == '}') {
+                status = COMPLETED;
+            }
+            goto next_loop;
+        } else {
+            break;
+        }
+next_loop:
+        ++iter;
+    }
+complete:
+    if (status != COMPLETED) {
+        throw ParseError("invalid json string", iter - begin);
+    }
+    return iter - begin;
+}
+
+
+
+string_type::difference_type _ParseString(Json &json, 
+        typename string_type::const_iterator begin, 
+        typename string_type::const_iterator end) throw (ParseError)
+{
+    enum Status {WAIT_QUOT1, WAIT_QUOT2, BACKSLASH_PENDING, COMPLETED};
+    Status status = WAIT_QUOT1;
+    auto iter = begin;
+    string_type result;
+    while (iter < end) {
+        if (IsWhitespace(*iter)) {
+            goto next_loop;
+        }
+
+        if (status == WAIT_QUOT1) {
+            switch (*iter) {
+            case '\"': {
+                status = WAIT_QUOT2;
+                goto next_loop;
+            }
+            default:
+                goto complete;
+            }
+        } else if (status == WAIT_QUOT2) {
+            if (IsControlChar(*iter)) {
+                goto complete;
+            }
+            switch (*iter) {
+            case '\"': {
+                status = COMPLETED;
+                goto next_loop;
+            }
+            case '\\': {
+                status = BACKSLASH_PENDING;
+                goto next_loop;
+            }
+            default:
+                result.push_back(*iter);
+            }
+        } else if (status == BACKSLASH_PENDING) {
+            switch (*iter) {
+            case '\\':
+            case '/':
+            case '\"': {
+                result.push_back(*iter);
+                break;
+            }
+            case 'b': {
+                result.push_back(L'\b');
+                break;
+            }
+            case 'f': {
+                result.push_back(L'\f');
+                break;
+            }
+            case 'n': {
+                result.push_back(L'\n');
+                break;
+            }
+            case 'r': {
+                result.push_back(L'\r');
+                break;
+            }
+            case 't': {
+                result.push_back(L'\t');
+                break;
+            }
+            case 'u': {
+                using charT = string_type::value_type;
+                charT c;
+                try {
+                    c = static_cast<charT>(
+                            stoi(string_type(iter+1, iter+5), nullptr, 16));
+                } catch (std::invalid_argument &e) {
+                    throw ParseError("invalid json string.", iter - begin);
+                } 
+                iter += 4;
+                result.push_back(c);
+                break;
+            }
+            default: {
+                goto complete;
+            }
+            }
+            status = WAIT_QUOT2;
+        } else if (status == COMPLETED) {
+            break;
+        }
+next_loop:
+        ++iter;
+    }
+complete:
+    if (status == COMPLETED) {
+        json = Json(result);
+        return iter - begin;
+    } else {
+        throw ParseError("invalid json string", iter - begin);
+    }
+}
+
+
+string_type::difference_type _ParseValue(Json &json, 
+        typename string_type::const_iterator begin, 
+        typename string_type::const_iterator end) throw (ParseError)
+{
+    auto iter = begin;
+    bool completed = false;
+    while (iter < end) {
+        if (IsWhitespace(*iter)) {
+            goto next_loop;
+        }
+        switch (*iter) {
+        case '{': {
+            string_type::difference_type i;
+            try {
+                i = _ParseObject(json, iter, end);
+            } catch (ParseError &e) {
+                i = e.GetOffset();
+            }
+            iter += i;
+            goto complete;
+        }
+        case '[': {
+            string_type::difference_type i;
+            try {
+                i = _ParseArray(json, iter, end);
+            } catch (ParseError &e) {
+                i = e.GetOffset();
+            }
+            iter += i;
+            goto complete;
+        }
+        case '\"': {
+            string_type::difference_type i;
+            try {
+                i = _ParseString(json, iter, end);
+            } catch (ParseError &e) {
+                i = e.GetOffset();
+            }
+            iter += i;
+            goto complete;
+        }
+        case 't':
+            if (string_type(iter+1, iter+4) == L"rue") {
+                json = Json(true);
+                completed = true;
+                break;
+            } else {
+                goto complete;
+            }
+        case 'f':
+            if (string_type(iter+1, iter+5) == L"alse") {
+                json = Json(false);
+                completed = true;
+                break;
+            } else {
+                goto complete;
+            }
+        case 'n':
+            if (string_type(iter+1, iter+4) == L"ull") {
+                json = Json(false);
+                completed = true;
+                break;
+            } else{
+                goto complete;
+            }
+        }
+        if (completed) break;
+next_loop:
+        ++iter;
+    }
+complete:
+    if (!completed) {
+        throw ParseError("invalid json string", iter - begin);
+    }
+    return iter - begin;
 }
 };
