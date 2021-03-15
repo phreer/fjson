@@ -40,6 +40,6 @@ int main()
     std::wcout << json["test1"] << std::endl;
     std::wcout << json << std::endl;
     std::wstring json_str = LR"({"1.": 2, "nested": {"key": "value", "ok": true}, "pi": 3.14, "test": 0.3, "test1": 1000})";
-    _ParseString(json, json_str.begin(), json_str.end());
+    _ParseValue(json, json_str.begin(), json_str.end());
     std::wcout << json;
 }

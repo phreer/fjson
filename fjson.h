@@ -51,6 +51,8 @@ public:
     {
         return message_.c_str();
     }
+protected:
+    std::string GetMessage() const { return message_; }
 private:
     std::string message_;
 };
@@ -76,14 +78,24 @@ class ParseError: public JsonError
 public:
     ParseError() = default;
     ParseError(const std::string &message, 
-               string_type::difference_type offset):
-            JsonError(message), offset_(offset) {}
+               string_type::difference_type offset, 
+               const string_type &processed_string):
+            JsonError(message), 
+            offset_(offset), 
+            processed_string_(processed_string)
+    {}
     ParseError(std::string &&message, 
-               string_type::difference_type offset): 
-            JsonError(std::move(message)) {}
+               string_type::difference_type offset, 
+               string_type &&processed_string):
+            JsonError(std::move(message)), 
+            offset_(offset), 
+            processed_string_(std::move(processed_string))
+    {}
     string_type::difference_type GetOffset() const { return offset_; }
+    const string_type& GetProcessedString() const { return processed_string_; }
 private:
     string_type::difference_type offset_;
+    string_type processed_string_;
 };
 
 
@@ -513,6 +525,11 @@ bool IsControlChar(string_type::value_type c)
 }
 
 
+bool IsDigit(charT c) {
+    return '0' <= c && c <= '9';
+}
+
+
 string_type::difference_type _ParseValue(Json &json, 
         typename string_type::const_iterator begin, 
         typename string_type::const_iterator end) throw (ParseError);
@@ -569,7 +586,9 @@ string_type::difference_type _ParseArray(Json &json,
                 try {
                     i = _ParseValue(json[count], iter+1, end);
                 } catch (ParseError &e) {
-                    throw ParseError("invalid json string", iter - begin + i + 1);
+                    throw ParseError("invalid json array", 
+                                     iter - begin + i + 1,
+                                     string_type(iter, end));
                 }
             }
             }
@@ -599,12 +618,12 @@ string_type::difference_type _ParseObject(Json &json,
     Json key, value;
     while (iter < end) {
         if (IsWhitespace(*iter)) {
-            goto next_loop;
+            goto next_iter;
         }
         if (status == WAIT_LBRACE) {
             if (*iter == '{') {
                 status = WAIT_STRING1;
-                goto next_loop;
+                goto next_iter;
             } else {
                 goto complete;
             }
@@ -612,13 +631,15 @@ string_type::difference_type _ParseObject(Json &json,
             // Empty object
             if (*iter == '}') {
                 status = COMPLETED;
-                goto next_loop;
+                goto next_iter;
             }
             string_type::difference_type i;
             try {
                 i = _ParseString(key, iter, end);
             } catch (ParseError &e) {
-                throw ParseError("invalid json string", iter - begin + e.GetOffset());
+                throw ParseError("invalid json object", 
+                                 iter - begin + e.GetOffset(),
+                                 string_type(begin, end));
             }
             status = WAIT_COLON;
             iter += i;
@@ -628,7 +649,9 @@ string_type::difference_type _ParseObject(Json &json,
             try {
                 i = _ParseString(key, iter, end);
             } catch (ParseError &e) {
-                throw ParseError("invalid json string", iter - begin + e.GetOffset());
+                throw ParseError("invalid json object", 
+                                 iter - begin + e.GetOffset(),
+                                 string_type(begin, end));
             }
             status = WAIT_COLON;
             iter += i;
@@ -640,7 +663,9 @@ string_type::difference_type _ParseObject(Json &json,
                 try {
                     i = _ParseValue(value, iter, end);
                 } catch (ParseError &e) {
-                    throw ParseError("invalid json string", iter - begin + e.GetOffset());
+                    throw ParseError("invalid json object", 
+                                     iter - begin + e.GetOffset(), 
+                                     string_type(begin, end));
                 }
                 status = WAIT_RBRACE_COMMA;
                 iter += i;
@@ -653,16 +678,18 @@ string_type::difference_type _ParseObject(Json &json,
             } else if (*iter == '}') {
                 status = COMPLETED;
             }
-            goto next_loop;
+            goto next_iter;
         } else {
             break;
         }
-next_loop:
+next_iter:
         ++iter;
     }
 complete:
     if (status != COMPLETED) {
-        throw ParseError("invalid json string", iter - begin);
+        throw ParseError("invalid json object", 
+                         iter - begin, 
+                         string_type(begin, end));
     }
     return iter - begin;
 }
@@ -679,14 +706,14 @@ string_type::difference_type _ParseString(Json &json,
     string_type result;
     while (iter < end) {
         if (IsWhitespace(*iter)) {
-            goto next_loop;
+            goto next_iter;
         }
 
         if (status == WAIT_QUOT1) {
             switch (*iter) {
             case '\"': {
                 status = WAIT_QUOT2;
-                goto next_loop;
+                goto next_iter;
             }
             default:
                 goto complete;
@@ -698,11 +725,11 @@ string_type::difference_type _ParseString(Json &json,
             switch (*iter) {
             case '\"': {
                 status = COMPLETED;
-                goto next_loop;
+                goto next_iter;
             }
             case '\\': {
                 status = BACKSLASH_PENDING;
-                goto next_loop;
+                goto next_iter;
             }
             default:
                 result.push_back(*iter);
@@ -742,7 +769,9 @@ string_type::difference_type _ParseString(Json &json,
                     c = static_cast<charT>(
                             stoi(string_type(iter+1, iter+5), nullptr, 16));
                 } catch (std::invalid_argument &e) {
-                    throw ParseError("invalid json string.", iter - begin);
+                    throw ParseError("invalid json string.", 
+                                     iter - begin, 
+                                     string_type(begin, end));
                 } 
                 iter += 4;
                 result.push_back(c);
@@ -756,7 +785,7 @@ string_type::difference_type _ParseString(Json &json,
         } else if (status == COMPLETED) {
             break;
         }
-next_loop:
+next_iter:
         ++iter;
     }
 complete:
@@ -764,7 +793,138 @@ complete:
         json = Json(result);
         return iter - begin;
     } else {
-        throw ParseError("invalid json string", iter - begin);
+        throw ParseError("invalid json string", 
+                         iter - begin, 
+                         string_type(begin, end));
+    }
+}
+
+
+string_type::difference_type _ParseNumber(Json &json, 
+        typename string_type::const_iterator begin, 
+        typename string_type::const_iterator end) throw (ParseError)
+{
+    enum Status {START, WAIT_DIGIT1, WAIT_DIGIT2, FRACTION, WAIT_FRACTION_DIGIT, 
+            WAIT_FRACTION_DIGIT_END, WAIT_E_DIGIT, WAIT_E_SIGN, COMPLETED, BAD};
+    Status status = START;
+    auto iter = begin;
+    double result;
+    string_type s;
+    while (iter < end) {
+        if (status = START) {
+            if (IsWhitespace(*iter)) {
+                goto next_iter;
+            } else if (*iter == '-') {
+                status = WAIT_DIGIT1;
+                goto add_char;
+            } else if (IsDigit(*iter)) {
+                status = WAIT_DIGIT1;
+                goto next_iter;
+            } else {
+                status = BAD;
+                goto complete;
+            }
+        } else if (status == WAIT_DIGIT1) {
+            if (*iter == '0') {
+                status = FRACTION;
+                goto add_char;
+            } else if (IsDigit(*iter)) {
+                status = WAIT_DIGIT2;
+                goto add_char;
+            } else {
+                status = BAD;
+                goto complete;
+            }
+        } else if (status == WAIT_DIGIT2) {
+            if (IsDigit(*iter)) {
+                goto add_char;
+            } else if (*iter == '.') {
+                status = WAIT_FRACTION_DIGIT;
+                goto add_char;
+            } else if (*iter == 'e' || *iter == 'E') {
+                status = WAIT_E_SIGN;
+                goto add_char;
+            } else if (IsWhitespace(*iter)) {
+                status = COMPLETED;
+                goto next_iter;
+            } else {
+                goto complete;
+            }
+        } else if (status == FRACTION) {
+            if (*iter == '.') {
+                status = WAIT_FRACTION_DIGIT;
+                goto next_iter;
+            } else if (*iter == 'e' || *iter == 'E') {
+                status = WAIT_E_SIGN;
+                goto next_iter;
+            } if (IsWhitespace(*iter)) {
+                status = COMPLETED;
+                goto next_iter;
+            } else {
+                status = BAD;
+                goto complete;
+            }
+        } else if (status == WAIT_FRACTION_DIGIT) {
+            if (IsDigit(*iter)) {
+                status = WAIT_FRACTION_DIGIT_END;
+                goto next_iter;
+            } else {
+                status = BAD;
+                goto complete;
+            } 
+        } else if (status == WAIT_FRACTION_DIGIT_END) {
+            if (IsDigit(*iter)) {
+                goto add_char;
+            } else if (*iter == 'e' || *iter == 'E') {
+                status = WAIT_E_SIGN;
+                goto add_char;
+            } else if (IsWhitespace(*iter)) {
+                status = COMPLETED;
+                goto next_iter;
+            } else {
+                status = BAD;
+                goto complete;
+            }
+        } else if (status == WAIT_E_SIGN) {
+            if (IsDigit(*iter)) {
+                status = WAIT_E_DIGIT;
+                continue;
+            } else if (*iter == '-' || *iter == '+') {
+                status = WAIT_E_DIGIT;
+                goto add_char;
+            } else {
+                status = BAD;
+                goto complete;
+            }
+        } else if (status == WAIT_E_DIGIT) {
+            if (IsDigit(*iter)) {
+                goto add_char;
+            } else if (IsDigit(*iter)) {
+                status = COMPLETED;
+                goto complete;
+            }
+        }
+        else {
+            break;
+        }
+add_char:
+        s.push_back(*iter);
+next_iter:
+        iter++;
+    }
+complete:
+    switch (status)
+    {
+    case COMPLETED:
+    case WAIT_E_DIGIT:
+    case FRACTION:
+    case WAIT_DIGIT2: 
+        json = std::stod(s); 
+        break;
+    default:
+        throw ParseError("invalid json number", 
+                         iter - begin, 
+                         string_type(begin, end));
     }
 }
 
@@ -777,7 +937,7 @@ string_type::difference_type _ParseValue(Json &json,
     bool completed = false;
     while (iter < end) {
         if (IsWhitespace(*iter)) {
-            goto next_loop;
+            goto next_iter;
         }
         switch (*iter) {
         case '{': {
@@ -834,14 +994,28 @@ string_type::difference_type _ParseValue(Json &json,
             } else{
                 goto complete;
             }
+        case '1': case '2': case '3': case '4': case '5': case '6': case '7':
+        case '8': case '9': case '0': case '-': {
+            string_type::difference_type i;
+            try {
+                i = _ParseNumber(json, iter, end);
+                completed = true;
+            } catch (ParseError &e) {
+                i = e.GetOffset();
+            }
+            iter += i;
+            goto complete;
+        }
         }
         if (completed) break;
-next_loop:
+next_iter:
         ++iter;
     }
 complete:
     if (!completed) {
-        throw ParseError("invalid json string", iter - begin);
+        throw ParseError("invalid json value", 
+                         iter - begin, 
+                         string_type(begin, end));
     }
     return iter - begin;
 }
