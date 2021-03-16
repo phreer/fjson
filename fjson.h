@@ -104,8 +104,13 @@ class Json;
 class JsonValue
 {
 public:
+    using array_container_type = std::vector<Json>;
+    using object_container_type = std::map<string_type, Json>;
+    using size_type = array_container_type::size_type;
+
     // static JsonValue* parseFile(std::string filename);
     JsonValue(JsonValueType type): type_(type) {}
+
     virtual ~JsonValue() {}
     JsonValueType GetType() const { return type_; }
     bool IsNumber() const { return type_ == JsonValueType::Number; }
@@ -116,61 +121,6 @@ public:
     bool IsArray() const { return type_ == JsonValueType::Array; }
     bool IsObject() const { return type_ == JsonValueType::Object; }
     bool IsValid() const { return type_ != JsonValueType::InvalidValue; }
-    virtual size_t size() const
-    {
-        std::string message = "calling size() is incompatible for '";
-        message += std::string(ValueTypeToStr(GetType())) + "'";
-        throw IncompatibleTypeError(std::move(message));
-    }
-    // Note that functions toXXX() throw 'IncompatibleTypeError' when called by 
-    // incompatable type. These functions try to convert 'JsonValue's to 
-    // built-in types
-    // For number
-    virtual double ToDouble() const
-    {
-        throw IncompatibleTypeError();
-    }
-    virtual bool ToBool() const
-    {
-        throw IncompatibleTypeError();
-    }
-    // For string
-    virtual string_type ToString() const
-    {
-        throw IncompatibleTypeError();
-    }
-    virtual string_type& GetStringRef()
-    {
-        throw IncompatibleTypeError();
-    }
-    virtual const string_type& GetStringRef() const
-    {
-        throw IncompatibleTypeError();
-    }
-
-    // For object
-    virtual Json& operator[] (const string_type &key)
-    {
-        throw IndexTypeError();
-    }
-    virtual Json& operator[] (string_type &&key)
-    {
-        throw IndexTypeError();
-    }
-    virtual const Json& operator[] (const string_type &key) const
-    {
-        throw IndexTypeError();
-    }
-    
-    // For array
-    virtual Json& operator[] (int index)
-    {
-        throw IndexTypeError();
-    }
-    virtual const Json& operator[] (int index) const
-    {
-        throw IndexTypeError();
-    }
     
 private:
     JsonValueType type_;
@@ -186,11 +136,12 @@ public:
 class JsonNumber: public JsonValue
 {
 public:
-   JsonNumber(double value): JsonValue(JsonValueType::Number), value_(value) {}
-   virtual double ToDouble() const override
-   {
-       return value_;
-   }
+    JsonNumber(): JsonValue(JsonValueType::Number), value_(0.) {}
+    JsonNumber(double value): JsonValue(JsonValueType::Number), value_(value) {}
+    double ToDouble() const
+    {
+        return value_;
+    }
 private:
     double value_;
 };
@@ -200,6 +151,7 @@ class JsonTrue: public JsonValue
 public:
     JsonTrue(): JsonValue(JsonValueType::True) {}
     ~JsonTrue() {}
+    operator bool() const { return true; }
 };
 
 class JsonFalse: public JsonValue
@@ -207,109 +159,56 @@ class JsonFalse: public JsonValue
 public:
     JsonFalse(): JsonValue(JsonValueType::False) {}
     ~JsonFalse() {}
+    operator bool() const { return false; }
 };
 
-class JsonString: public JsonValue
+class JsonString: public JsonValue, public string_type
 {
 public:
-    JsonString(const string_type &str): JsonValue(JsonValueType::String), value_(str) {}
-    JsonString(string_type &&str): JsonValue(JsonValueType::String), value_(str) {}
-    virtual string_type ToString() const override
+    JsonString(const string_type &str):
+            JsonValue(JsonValueType::String), string_type(str) {}
+    JsonString(string_type &&str): 
+            JsonValue(JsonValueType::String), string_type(std::move(str)) {}
+    string_type ToString() const
     {
-        return value_;
+        return string_type(this->c_str());
     }
-    virtual const string_type& GetStringRef() const override
+    const string_type& GetStringRef() const
     {
-        return value_;
+        return *this;
     }
-    virtual string_type& GetStringRef() override
+    string_type& GetStringRef()
     {
-        return value_;
+        return *this;
     }
-private:
-    string_type value_;
 };
 
 
-class JsonArray: public JsonValue
+class JsonArray: public JsonValue, public std::vector<Json>
 {
 public:
     using container_type = std::vector<Json>;
     using iterator = container_type::iterator;
     using const_iterator = container_type::const_iterator;
+    using size_type = container_type::size_type;
+    using difference_type = container_type::difference_type;
 
+    JsonArray(): JsonValue(JsonValueType::Array) {}
     JsonArray(const std::initializer_list<Json> &init_list): 
-        JsonValue(JsonValueType::Array), values_(init_list) {}
-    virtual Json& operator[] (int index) override
-    {
-        assert(index < values_.size() && -index <= static_cast<int>(values_.size()));
-        size_t i = 0;
-        if (index >= 0) i = static_cast<size_t>(index);
-        else i = static_cast<size_t>(static_cast<int>(values_.size()) + index);
-        return values_[i];
-    }
-    virtual size_t size() const override { return values_.size(); }
-    iterator begin()
-    {
-        return values_.begin();
-    }
-    iterator end()
-    {
-        return values_.end();
-    }
-    const_iterator cbegin()
-    {
-        return values_.cbegin();
-    }
-    const_iterator cend()
-    {
-        return values_.cend();
-    }
-private:
-    container_type values_;
+        JsonValue(JsonValueType::Array), std::vector<Json>(init_list) {}
 };
 
 
-class JsonObject: public JsonValue
+class JsonObject: public JsonValue, public std::map<string_type, Json>
 {
 public:
     using container_type = std::map<string_type, Json>;
     using iterator = container_type::iterator;
     using const_iterator = container_type::const_iterator;
+    using size_type = container_type::size_type;
+    using difference_type = container_type::difference_type;
 
     JsonObject(): JsonValue(JsonValueType::Object) {}
-
-    virtual Json& operator[] (const string_type &key) override
-    {
-        return kvalues_[key];
-    }
-    virtual  Json& operator[] (string_type &&key) override
-    {
-        return kvalues_[std::move(key)];
-    }
-    virtual const Json& operator[] (const string_type &key) const override
-    {
-        return kvalues_.at(key);
-    }
-    iterator begin()
-    {
-        return kvalues_.begin();
-    }
-    iterator end()
-    {
-        return kvalues_.end();
-    }
-    const_iterator cbegin() const
-    {
-        return kvalues_.cbegin();
-    }
-    const_iterator cend() const
-    {
-        return kvalues_.cend();
-    }
-
-private:
-    container_type kvalues_;
 };
 
 
@@ -324,9 +223,43 @@ public:
 class Json
 {
 public:
+    using object_container_type = JsonObject::container_type;
+    using array_container_type = JsonArray::container_type;
+    using size_type = array_container_type::size_type;
     Json()
     {
         json_value_ = std::make_shared<JsonInvalidValue>();
+    }
+    Json(JsonValueType type)
+    {
+        switch(type) {
+        case JsonValueType::Number: {
+            json_value_ = std::make_shared<JsonNumber>();
+            break;
+        }
+        case JsonValueType::False: {
+            json_value_ = std::make_shared<JsonFalse>();
+            break;
+        }
+        case JsonValueType::True: {
+            json_value_ = std::make_shared<JsonTrue>();
+            break;
+        }
+        case JsonValueType::Null: {
+            json_value_ = std::make_shared<JsonNull>();
+            break;
+        }
+        case JsonValueType::Array: {
+            json_value_ = std::make_shared<JsonArray>();
+            break;
+        }
+        case JsonValueType::Object: {
+            json_value_ = std::make_shared<JsonObject>();
+            break;
+        }
+        default:
+            json_value_ = std::make_shared<JsonInvalidValue>();
+        }
     }
     Json(double value)
     {
@@ -371,57 +304,185 @@ public:
             json_value_ = std::make_shared<JsonArray>(init_list);
         }
     }
-    size_t size() const { return json_value_->size(); }
+    size_type size() const
+    {
+        if (this->IsArray())
+        {
+            auto p = std::static_pointer_cast<JsonArray>(json_value_);
+            return p->size();
+        } else if (this->IsObject())
+        {
+            auto p = std::static_pointer_cast<JsonObject>(json_value_);
+            return p->size();
+        }
+        std::string message = std::string("calling size() on ") + 
+                ValueTypeToStr(GetType()) + " is invalid";
+        throw IncompatibleTypeError(std::move(message));
+    }
     JsonValueType GetType() const { return json_value_->GetType(); } 
-    double ToDouble() const { return json_value_->ToDouble(); }
-    bool ToBool() const { return json_value_->ToBool(); }
-
+    double ToDouble() const
+    {
+        if (this->IsNumber()) {
+            auto p = std::static_pointer_cast<JsonNumber>(json_value_);
+            return p->ToDouble();
+        }
+        std::string message = std::string("calling ToDouble() on ") + 
+                ValueTypeToStr(GetType()) + " is invalid";
+        throw IncompatibleTypeError(std::move(message));
+    }
+    bool ToBool() const {
+        if (this->IsTrue()) return true;
+        if (this->IsFalse()) return false;
+        std::string message = std::string("calling ToBool() on ") + 
+                ValueTypeToStr(GetType()) + " is invalid";
+        throw IncompatibleTypeError(std::move(message));
+    }
+    void resize(size_type n)
+    {
+        if (this->IsArray()) {
+            auto p = std::static_pointer_cast<JsonArray>(json_value_);
+            return p->resize(n);
+        } else if (this->IsString()) {
+            auto p = std::static_pointer_cast<JsonString>(json_value_);
+            return p->resize(n);
+        }
+        std::string message = std::string("calling resize() on ") + 
+                ValueTypeToStr(GetType()) + " is invalid";
+        throw IncompatibleTypeError(std::move(message));
+    }
     // For string
-    string_type ToString() const { return json_value_->ToString(); }
-    string_type& GetStringRef() { return json_value_->GetStringRef(); }
-    const string_type& GetStringRef() const { return json_value_->GetStringRef(); }
+    string_type ToString() const
+    {
+        if (this->IsString()) {
+            auto p = std::static_pointer_cast<JsonString>(json_value_);
+            return p->ToString();
+        }
+        std::string message = std::string("calling ToString() on ") + 
+                ValueTypeToStr(GetType()) + " is invalid";
+        throw IncompatibleTypeError(std::move(message));
+    }
+
+    string_type& GetStringRef()
+    {
+        if (this->IsString()) {
+            auto p = std::static_pointer_cast<JsonString>(json_value_);
+            return p->GetStringRef();
+        }
+        std::string message = std::string("calling GetStringRef() on ") + 
+                ValueTypeToStr(GetType()) + " is invalid";
+        throw IncompatibleTypeError(std::move(message));
+    }
+
+    const string_type& GetStringRef() const
+    {
+        if (this->IsString()) {
+            auto p = std::static_pointer_cast<JsonString>(json_value_);
+            return p->GetStringRef();
+        }
+        std::string message = std::string("calling GetStringRef() on ") + 
+                ValueTypeToStr(GetType()) + " is invalid";
+        throw IncompatibleTypeError(std::move(message));
+    }
+
     Json& operator[] (const string_type &key)
     {
-        return json_value_->operator[](key);
-    }
-    Json& operator[] (string_type &&key)
-    {
-        return json_value_->operator[](std::move(key));
-    }
-    const Json& operator[] (const string_type &key) const
-    {
-        return json_value_->operator[](key);
+        if (this->IsObject()) {
+            auto p = std::static_pointer_cast<JsonObject>(json_value_);
+            return (*p)[key];
+        }
+        std::string message = std::string("indexing with string on ") + 
+                ValueTypeToStr(GetType()) + " is invalid";
+        throw IndexTypeError(std::move(message));
     }
 
-    Json& operator[] (const charT *key)
+    Json& operator[] (string_type &&key)
     {
-        return json_value_->operator[](string_type(key));
+        if (this->IsObject()) {
+            auto p = std::static_pointer_cast<JsonObject>(json_value_);
+            return (*p)[std::move(key)];
+        }
+        std::string message = std::string("indexing with string on ") + 
+                ValueTypeToStr(GetType()) + " is invalid";
+        throw IndexTypeError(std::move(message));
     }
-    const Json& operator[] (const charT *key) const
+
+
+    const Json& operator[] (const string_type &key) const
     {
-        return json_value_->operator[](string_type(key));
+        if (this->IsObject()) {
+            auto p = std::static_pointer_cast<JsonObject>(json_value_);
+            return (*p)[key];
+        }
+        std::string message = std::string("indexing with string on ") + 
+                ValueTypeToStr(GetType()) + " is invalid";
+        throw IndexTypeError(std::move(message));
     }
+
+
     Json& operator[] (const Json &key)
     {
-        return json_value_->operator[](key.GetStringRef());
+        if (!key.IsString())
+        {
+            throw IndexTypeError("indexing with unsupported type");
+        }
+        if (this->IsObject()) {
+            auto p = std::static_pointer_cast<JsonObject>(json_value_);
+            return (*p)[key.GetStringRef()];
+        }
+        std::string message = std::string("indexing with string on ") + 
+                ValueTypeToStr(GetType()) + " is invalid";
+        throw IndexTypeError(std::move(message));
     }
     Json& operator[] (Json &&key)
     {
-        return json_value_->operator[](std::move(key.GetStringRef()));
+        if (!key.IsString())
+        {
+            throw IndexTypeError("indexing with unsupported type");
+        }
+        if (this->IsObject()) {
+            auto p = std::static_pointer_cast<JsonObject>(json_value_);
+            return (*p)[std::move(key.GetStringRef())];
+        }
+        std::string message = std::string("indexing with string on ") + 
+                ValueTypeToStr(GetType()) + " is invalid";
+        throw IndexTypeError(std::move(message));
     }
     const Json& operator[] (const Json &key) const
     {
-        return json_value_->operator[](key.GetStringRef());
+        if (!key.IsString())
+        {
+            throw IndexTypeError("indexing with unsupported type");
+        }
+        if (this->IsObject()) {
+            auto p = std::static_pointer_cast<JsonObject>(json_value_);
+            return (*p)[key.GetStringRef()];
+        }
+        std::string message = std::string("indexing with string on ") + 
+                ValueTypeToStr(GetType()) + " is invalid";
+        throw IndexTypeError(std::move(message));
     }
 
     Json& operator[] (int index)
     {
-        return json_value_->operator[](index);
+        if (this->IsArray()) {
+            auto p = std::static_pointer_cast<JsonArray>(json_value_);
+            return (*p)[index];
+        }
+        std::string message = std::string("indexing with integer on ") + 
+                ValueTypeToStr(GetType()) + " is invalid";
+        throw IndexTypeError(std::move(message));
     }
     const Json& operator[] (int index) const
     {
-        return json_value_->operator[](index);
+        if (this->IsArray()) {
+            auto p = std::static_pointer_cast<JsonArray>(json_value_);
+            return (*p)[index];
+        }
+        std::string message = std::string("indexing with integer on ") + 
+                ValueTypeToStr(GetType()) + " is invalid";
+        throw IndexTypeError(std::move(message));
     }
+    
     bool IsNumber() const { return json_value_->IsNumber(); }
     bool IsNull() const { return json_value_->IsNull(); }
     bool IsTrue() const { return json_value_->IsTrue(); }
@@ -457,7 +518,7 @@ public:
         
     };
     
-    static Json parse(const string_type &str);
+    static Json Parse(const string_type &str);
 private:
     std::shared_ptr<JsonValue> json_value_;
 };
@@ -525,39 +586,38 @@ bool IsControlChar(string_type::value_type c)
 }
 
 
-bool IsDigit(charT c) {
+constexpr bool IsDigit(charT c) {
     return '0' <= c && c <= '9';
 }
 
 
 string_type::difference_type _ParseValue(Json &json, 
         typename string_type::const_iterator begin, 
-        typename string_type::const_iterator end) throw (ParseError);
+        typename string_type::const_iterator end);
 
 
 string_type::difference_type _ParseArray(Json &json, 
         typename string_type::const_iterator begin, 
-        typename string_type::const_iterator end) throw (ParseError);
+        typename string_type::const_iterator end);
 
 
 string_type::difference_type _ParseString(Json &json, 
         typename string_type::const_iterator begin, 
-        typename string_type::const_iterator end) throw (ParseError);
+        typename string_type::const_iterator end);
 
 
 string_type::difference_type _ParseObject(Json &json, 
         typename string_type::const_iterator begin, 
-        typename string_type::const_iterator end) throw (ParseError);
+        typename string_type::const_iterator end);
 
 
 string_type::difference_type _ParseArray(Json &json, 
         typename string_type::const_iterator begin, 
-        typename string_type::const_iterator end) throw (ParseError)
+        typename string_type::const_iterator end)
 {
-    enum Status {WAIT_LBRAKET, WAIT_RBRAKET, COMPLETED};
-    Status status = WAIT_LBRAKET;
+    enum Status {WAIT_LBRACKET, WAIT_RBRACKET, COMPLETED};
+    Status status = WAIT_LBRACKET;
     auto iter = begin;
-    size_t count = 0;
     while (iter < end) {
         // Skip whitespace
         if (IsWhitespace(*iter)) {
@@ -565,17 +625,28 @@ string_type::difference_type _ParseArray(Json &json,
             break;
         }
 
-        if (status == WAIT_LBRAKET) {
+        if (status == WAIT_LBRACKET) {
             switch (*iter) {
             case '[': {
-                status = WAIT_RBRAKET;
-                break;
+                string_type::difference_type i;
+                status = WAIT_RBRACKET;
+                json = Json(JsonValueType::Array);
+                json.resize(1);
+                try {
+                    i = _ParseValue(json[0], iter+1, end);
+                } catch (ParseError &e) {
+                    throw ParseError("invalid json array", 
+                                     iter - begin + i, 
+                                     string_type(iter+i, end));
+                }
+                iter += i + 1;
+                continue;
             }
             default: {
                 goto complete;
             }
             }
-        } else if (status == WAIT_RBRAKET) {
+        } else if (status == WAIT_RBRACKET) {
             switch (*iter) {
             case ']': {
                 status = COMPLETED;
@@ -583,23 +654,31 @@ string_type::difference_type _ParseArray(Json &json,
             }
             case ',': {
                 string_type::difference_type i;
+                json.resize(json.size() + 1);
                 try {
-                    i = _ParseValue(json[count], iter+1, end);
+                    i = _ParseValue(json[json.size() - 1], iter+1, end);
                 } catch (ParseError &e) {
                     throw ParseError("invalid json array", 
                                      iter - begin + i + 1,
                                      string_type(iter, end));
                 }
+                iter += i + 1;
+                continue;
             }
             }
         } else {
             goto complete;
         }
+next_iter:
         ++iter;
     }
 complete:
     if (status == COMPLETED) {
         return iter - begin;
+    } else {
+        throw ParseError("invalid json array", 
+                         iter - begin, 
+                         string_type(begin, end));
     }
 }
 
@@ -609,13 +688,14 @@ complete:
 // final character, i.e., '}', will be returned.
 string_type::difference_type _ParseObject(Json &json, 
         typename string_type::const_iterator begin, 
-        typename string_type::const_iterator end) throw (ParseError)
+        typename string_type::const_iterator end)
 {
     enum Status {WAIT_LBRACE, WAIT_STRING1, WAIT_STRING2, WAIT_COLON, 
                  WAIT_RBRACE_COMMA, COMPLETED};
     Status status = WAIT_LBRACE;
     auto iter = begin;
     Json key, value;
+    json = Json(JsonValueType::Object);
     while (iter < end) {
         if (IsWhitespace(*iter)) {
             goto next_iter;
@@ -698,18 +778,17 @@ complete:
 
 string_type::difference_type _ParseString(Json &json, 
         typename string_type::const_iterator begin, 
-        typename string_type::const_iterator end) throw (ParseError)
+        typename string_type::const_iterator end)
 {
     enum Status {WAIT_QUOT1, WAIT_QUOT2, BACKSLASH_PENDING, COMPLETED};
     Status status = WAIT_QUOT1;
     auto iter = begin;
     string_type result;
     while (iter < end) {
-        if (IsWhitespace(*iter)) {
-            goto next_iter;
-        }
-
         if (status == WAIT_QUOT1) {
+            if (IsWhitespace(*iter)) {
+                goto next_iter;
+            }
             switch (*iter) {
             case '\"': {
                 status = WAIT_QUOT2;
@@ -790,7 +869,7 @@ next_iter:
     }
 complete:
     if (status == COMPLETED) {
-        json = Json(result);
+        json = Json(std::move(result));
         return iter - begin;
     } else {
         throw ParseError("invalid json string", 
@@ -802,16 +881,17 @@ complete:
 
 string_type::difference_type _ParseNumber(Json &json, 
         typename string_type::const_iterator begin, 
-        typename string_type::const_iterator end) throw (ParseError)
+        typename string_type::const_iterator end)
 {
     enum Status {START, WAIT_DIGIT1, WAIT_DIGIT2, FRACTION, WAIT_FRACTION_DIGIT, 
-            WAIT_FRACTION_DIGIT_END, WAIT_E_DIGIT, WAIT_E_SIGN, COMPLETED, BAD};
+            WAIT_FRACTION_DIGIT_END, WAIT_E_DIGIT, WAIT_E_SIGN, WAIT_E_DIGIT_END, 
+            COMPLETED, BAD};
     Status status = START;
     auto iter = begin;
     double result;
     string_type s;
     while (iter < end) {
-        if (status = START) {
+        if (status == START) {
             if (IsWhitespace(*iter)) {
                 goto next_iter;
             } else if (*iter == '-') {
@@ -819,7 +899,7 @@ string_type::difference_type _ParseNumber(Json &json,
                 goto add_char;
             } else if (IsDigit(*iter)) {
                 status = WAIT_DIGIT1;
-                goto next_iter;
+                continue;
             } else {
                 status = BAD;
                 goto complete;
@@ -867,7 +947,7 @@ string_type::difference_type _ParseNumber(Json &json,
         } else if (status == WAIT_FRACTION_DIGIT) {
             if (IsDigit(*iter)) {
                 status = WAIT_FRACTION_DIGIT_END;
-                goto next_iter;
+                goto add_char;
             } else {
                 status = BAD;
                 goto complete;
@@ -878,9 +958,9 @@ string_type::difference_type _ParseNumber(Json &json,
             } else if (*iter == 'e' || *iter == 'E') {
                 status = WAIT_E_SIGN;
                 goto add_char;
-            } else if (IsWhitespace(*iter)) {
+            } else if (IsWhitespace(*iter) || *iter == ',') {
                 status = COMPLETED;
-                goto next_iter;
+                goto complete;
             } else {
                 status = BAD;
                 goto complete;
@@ -898,13 +978,23 @@ string_type::difference_type _ParseNumber(Json &json,
             }
         } else if (status == WAIT_E_DIGIT) {
             if (IsDigit(*iter)) {
+                status = WAIT_E_DIGIT_END;
                 goto add_char;
-            } else if (IsDigit(*iter)) {
-                status = COMPLETED;
+            } else {
+                status = BAD;
                 goto complete;
             }
-        }
-        else {
+        } else if (status == WAIT_E_DIGIT_END) {
+            if (IsDigit(*iter)) {
+                goto add_char;
+            } else if (IsWhitespace(*iter) || *iter == ',') {
+                status = COMPLETED;
+                goto complete;
+            } else {
+                status = BAD;
+                goto complete;
+            }
+        } else {
             break;
         }
 add_char:
@@ -916,11 +1006,12 @@ complete:
     switch (status)
     {
     case COMPLETED:
-    case WAIT_E_DIGIT:
     case FRACTION:
     case WAIT_DIGIT2: 
+    case WAIT_FRACTION_DIGIT_END:
+    case WAIT_E_DIGIT_END:
         json = std::stod(s); 
-        break;
+        return iter - begin;
     default:
         throw ParseError("invalid json number", 
                          iter - begin, 
@@ -931,7 +1022,7 @@ complete:
 
 string_type::difference_type _ParseValue(Json &json, 
         typename string_type::const_iterator begin, 
-        typename string_type::const_iterator end) throw (ParseError)
+        typename string_type::const_iterator end)
 {
     auto iter = begin;
     bool completed = false;
@@ -944,6 +1035,7 @@ string_type::difference_type _ParseValue(Json &json,
             string_type::difference_type i;
             try {
                 i = _ParseObject(json, iter, end);
+                completed = true;
             } catch (ParseError &e) {
                 i = e.GetOffset();
             }
@@ -954,6 +1046,7 @@ string_type::difference_type _ParseValue(Json &json,
             string_type::difference_type i;
             try {
                 i = _ParseArray(json, iter, end);
+                completed = true;
             } catch (ParseError &e) {
                 i = e.GetOffset();
             }
@@ -964,6 +1057,7 @@ string_type::difference_type _ParseValue(Json &json,
             string_type::difference_type i;
             try {
                 i = _ParseString(json, iter, end);
+                completed = true;
             } catch (ParseError &e) {
                 i = e.GetOffset();
             }
@@ -988,7 +1082,7 @@ string_type::difference_type _ParseValue(Json &json,
             }
         case 'n':
             if (string_type(iter+1, iter+4) == L"ull") {
-                json = Json(false);
+                json = Json(JsonValueType::Null);
                 completed = true;
                 break;
             } else{
