@@ -1,3 +1,8 @@
+// Author: Phree Liu
+
+#ifndef __FJSON_H__
+#define __FJSON_H__
+
 #include <iostream>
 #include <codecvt>
 #include <locale>
@@ -1114,3 +1119,5 @@ complete:
     return iter - begin;
 }
 };
+
+#endif // __FJSON_H__
